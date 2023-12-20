@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html>
+<head>
+ <!-- 解説サイト： https://www.otwo.jp/blog/canvas-drawing/ -->
+ <!-- history
+  20231215 解説サイトベース新規
+  20231216 2層化、canvas統合化（バグ残る）
+  20231218 パレット整理
+  20231220 消しゴム追加 -->
+<meta charset="utf-8">
+<title>simple paint</title>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.min.js"></script>
+<style>
+  .option{
+    width: 500px;
+  }
+  .color > a{
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+  }
+  .black{
+    background-color: #000000;
+  }
+  .brown{
+    background-color: #7f0000;
+  }
+  .red{
+    background-color: #ff0000;
+  }
+  .orange{
+    background-color: #ff7f00;
+  }
+  .yellow{
+    background-color: #ffff00;
+  }
+  .green{
+    background-color: #00ff1f;
+  }
+  .blue{
+    background-color: #0000ff;
+  }
+  .violet{
+    background-color: #7f00ff;
+  }
+  .gray{
+    background-color: #7f7f7f;
+  }
+  .white{
+    background-color: #ffffff;
+  }
+  .eraser{
+    background-color: #ffffff;
+    border: 1px;
+  }
+</style>
+</head>
+<body style="background-color:#bfbfbf">
+  <canvas id="canvas_ol" width="480" height="270" style="position:absolute;border: solid 1px #000;box-sizing: border-box;"></canvas>
+  <canvas id="canvas" width="480" height="270" style="border: solid 1px #000;box-sizing: border-box;"></canvas>
+  <div class="option">
+    <div class="color">
+      色：
+      <a href="" class="black" data-color="0, 0, 0, 1" data-bold="1"></a>
+      <a href="" class="brown" data-color="127, 0, 0, 1" data-bold="10"></a>
+      <a href="" class="red" data-color="255, 0, 0, 1" data-bold="10"></a>
+      <a href="" class="orange" data-color="255, 127, 0, 1" data-bold="10"></a>
+      <a href="" class="yellow" data-color="255, 255, 0, 1" data-bold="10"></a>
+      <a href="" class="green" data-color="0, 255, 31, 1" data-bold="10"></a>
+      <a href="" class="blue" data-color="0, 0, 255, 1" data-bold="10"></a>
+      <a href="" class="violet" data-color="127, 0, 255, 1" data-bold="10"></a>
+      <a href="" class="gray" data-color="127, 127, 127, 1" data-bold="10"></a>
+      <a href="" class="white" data-color="255, 255, 255, 1" data-bold="10"></a>
+	  <a href="" class="eraser" data-color="255, 255, 255, 0"></a>
+    </div>
+  </div>
+  <input type="button" value="clear" id="clear">
+  <a id="download" href="#" download="canvas.png">ダウンロード（上手く動かない）</a>
+  <a href="#description">説明</a>
+  <div id="result"><img decoding="async" src=""></div>
+  <div style="visible:hidden;">
+    <canvas id="canvas_f" width="480" height="270" style="border: solid 1px #000;box-sizing: border-box;"></canvas>
+  </div>
+  <div id="description">未完成 黒は手前レイヤーに太さ１で、それ以外の色は奥レイヤーに太さ10で描画されます。</div>
+  <div>ダウンロードを押すと下側に統合画像がコピーされ、保存ダイアログが出ますが、そのまま保存しても空の画像しか保存されません（原因不明）</div>
+  <div>下にコピーされた画像を右クリックして保存すると、背景が透過したpngが保存できます。また、上の画像を右クリックして保存すると、輪郭のみの透過画像を保存できます。</div>
+  <div>現状は対処方法が分からないので、暫定的にこの状態にします。</div>
+  <div>それ以外の既知の問題点：マウスでの描画のみ対応していて、タッチスクリーンには対応しません。Android向けchromeでも、マウスを接続すれば描画できますが、タッチに対応していません（やり方が分かりません）</div>
+  <div>マウスでドラッグして描画する際、マウスが画面外に出てそこでボタンを離すと、ボタンを押していないのに線を引かれる状態になってしまいます。その場合、描画エリア内でもう一度クリックすると止められます。（対処方法が分かりません）</div>
+  <div>オフラインで使用する場合、jqueryをダウンロードして、ソースを適宜書き換えてください</div>
+
+  <script>
+    // canvas
+    var cnvs2 = document.getElementById('canvas_ol');
+    var ctx2 = cnvs2.getContext('2d');
+    var cnvs = document.getElementById('canvas');
+    var ctx = cnvs.getContext('2d');
+    var cnvsf = document.getElementById('canvas_f');
+//     var cnvsf = document.createElement("canvas"); // テストで追加（下の行も）→うまく動かず 20231219
+//       cnvsf.width = 480; cnvsf.height = 270; cnvsf.id = "canvas_f";
+    var ctxf = cnvsf.getContext('2d');
+ 
+    // 変数宣言
+    const cnvWidth = 480; const cnvHeight = 270; // クリアする時に使う数値
+    var cnvColor = "0, 0, 0, 1";  // 線の色
+    var cnvBold = 1;  // 線の太さ
+    var clickFlg = 0;  // クリック中の判定 1:クリック開始 2:クリック中
+    var bgColor = "rgb(255,255,255)";
+    var pen = 0; // 追加 鉛筆か筆か
+ 
+    // canvasの背景色を設定(指定がない場合にjpeg保存すると背景が黒になる)
+//    setBgColor();
+ 
+    // canvas上でのイベント
+    $("#canvas_ol").mousedown(function(){
+      clickFlg = 1; // マウス押下開始
+    }).mouseup(function(){
+      clickFlg = 0; // マウス押下終了
+    }).mousemove(function(e){
+      // マウス移動処理
+      if(!clickFlg) return false;
+      if (pen == 1) {draw2(e.offsetX, e.offsetY);} else {draw(e.offsetX, e.offsetY);}
+    });
+//    $("#canvas").touchstart(function(){ // https://qiita.com/zprodev/items/2d7419a842eb45773510 から
+//      // 作ってみたが、スマホ上で動かず https://blog.myntinc.com/2020/05/javascript-mousetouch.html
+//      // なら解決のヒントになるかもしれない(2023/12/15 まだ試していない)
+//      // その後：この部分があると色替えが正常に行われなくなったので、コメント化した
+//      clickFlg = 1; // マウス押下開始
+//    }).touchend(function(){
+//      clickFlg = 0; // マウス押下終了
+//    }).touchmove(function(e){
+//      // マウス移動処理
+//      if(!clickFlg) return false;
+//      draw(e.offsetX, e.offsetY);
+//    });
+
+    // 描画処理
+    function draw(x, y) {
+      ctx2.lineWidth = cnvBold;
+      ctx2.strokeStyle = 'rgba('+cnvColor+')';
+      // 初回処理の判定
+      if (clickFlg == "1") {
+        clickFlg = "2";
+        ctx2.beginPath();
+        ctx2.lineCap = "round";  //　線を角丸にする
+        ctx2.moveTo(x, y);
+      } else {
+        ctx2.lineTo(x, y);
+      }
+      ctx2.stroke();
+    };
+    function draw2(x, y) {
+      ctx.lineWidth = cnvBold;
+      ctx.strokeStyle = 'rgba('+cnvColor+')';
+      // 初回処理の判定
+      if (clickFlg == "1") {
+        clickFlg = "2";
+        ctx.beginPath();
+        ctx.lineCap = "round";  //　線を角丸にする
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    };
+
+    /**
+     * Canvas合成 https://blog.katsubemakito.net/html5/canvas-concat
+     *
+     * @param {string} base 合成結果を描画するcanvas(id)
+     * @param {array} asset 合成する素材canvas(id)
+     * @return {void}
+     */
+     async function concatCanvas(base, asset){
+      const canvas = document.querySelector(base);
+      const ctx = canvas.getContext("2d");
+    
+      for(let i=0; i<asset.length; i++){
+        const image1 = await getImagefromCanvas(asset[i]);
+        ctx.drawImage(image1, 0, 0, canvas.width, canvas.height);
+      }
+    }
+
+    /**
+     * Canvasを画像として取得 https://blog.katsubemakito.net/html5/canvas-concat
+     *
+     * @param {string} id  対象canvasのid
+     * @return {object}
+     */
+    function getImagefromCanvas(id){
+      return new Promise((resolve, reject) => {
+        const image = new Image();
+        const ctx = document.querySelector(id).getContext("2d");
+        image.onload = () => resolve(image);
+        image.onerror = (e) => reject(e);
+        image.src = ctx.canvas.toDataURL();
+      });
+    }
+ 
+    // 色の変更
+    $(".color a").click(function(){
+      cnvColor = $(this).data("color");
+      if ($(this).data("bold")) {cnvBold = $(this).data("bold");} // 20231218 追加
+      if (cnvBold == 1) {pen = 0;} else {pen = 1;} // 20231218 追加
+      if (cnvColor == "255, 255, 255, 0") { // 20231220 消しゴムモードに設定
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx2.globalCompositeOperation = 'destination-out';
+		cnvColor = "255, 255, 255, 1"; cnvBold = 10;
+	  } else {
+	    ctx.globalCompositeOperation = 'source-over';
+	    ctx2.globalCompositeOperation = 'source-over';
+	  }
+      return false;
+    });
+
+    // 20231218メモ https://wild-outdoorlife.com/javascript/canvas-globalcompositeoperation/
+    // 消しゴムモード実装の場合上のリンクを参考にする
+ 
+    // 線の太さ変更
+    $(".bold a").click(function(){
+      cnvBold = $(this).data("bold");
+      if (cnvBold == 1) {pen = 0;} else {pen = 1;}
+      return false;
+    });
+ 
+    // 描画クリア
+    $("#clear").click(function(){
+      ctx.clearRect(0,0,cnvWidth,cnvHeight);
+      ctx2.clearRect(0,0,cnvWidth,cnvHeight);
+	  cnvBold = 1; cnvColor = "0, 0, 0, 1"; pen = 0; // クリア時はペンも初期化
+//      setBgColor();
+    });
+ 
+    // canvasを画像で保存
+    $("#download").click(function(){
+      ctxf.clearRect(0,0,cnvWidth,cnvHeight); concatCanvas("#canvas_f", ["#canvas", "#canvas_ol"]);
+//      canvas = document.getElementById('canvas_f'); // これをすると合成は出来たが、ダウンロードされた画像は一個古いものになってしまう
+      var base64 = canvas_f.toDataURL("image/png");
+      document.getElementById("download").href = base64;
+    });
+ 
+    function setBgColor(){
+      // canvasの背景色を設定(指定がない場合にjpeg保存すると背景が黒になる)
+      ctx.fillStyle = bgColor;
+      ctx.fillRect(0,0,cnvWidth,cnvHeight);
+    }
+  </script>
+</body>
+</html>
